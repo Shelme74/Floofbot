@@ -53,9 +53,12 @@ namespace Floofbot
             string avatar = "https://cdn.discordapp.com/attachments/440635657925165060/442039889475665930/Turqouise.jpg";
 
             // Get user's Discord joining date and time, in UTC
-            string discordJoin = user.CreatedAt.ToUniversalTime().ToString("dd\\/MMM\\/yyyy \\a\\t H:MM \\U\\T\\C");
+            string discordJoinDate = user.CreatedAt.ToUniversalTime().ToString("dd\\/MMM\\/yyyy");
+            string discordJoinTime = user.CreatedAt.ToUniversalTime().ToString("H:MM");
             // Get user's Guild joining date and time, in UTC
             string guildJoin = user.JoinedAt?.ToUniversalTime().ToString("dd\\/MMM\\/yyyy \\a\\t H:MM \\U\\T\\C");
+            string guildJoinDate = user.JoinedAt?.ToUniversalTime().ToString("dd\\/MMM\\/yyyy");
+            string guildJoinTime = user.JoinedAt?.ToUniversalTime().ToString("H:MM");
 
             if (user.AvatarId != null)
                 avatar = user.GetAvatarUrl(ImageFormat.Auto, 512);
@@ -64,8 +67,8 @@ namespace Floofbot
             infostring +=
                  $"**User** : {user.Nickname ?? user.Username} ({user.Username}#{user.Discriminator})\n" +
                  $"**ID** : {user.Id}\n" +
-                 $"**Discord Join Date** : {discordJoin} \n" +
-                 $"**Guild Join Date** : {guildJoin}\n" +
+                 $"**Discord Join Date** : {discordJoinDate} at {discordJoinTime} UTC \n" +
+                 $"**Guild Join Date** : {guildJoinDate} at {guildJoinTime} UTC \n" +
                  $"**Status** : {user.Status}\n";
 
             EmbedBuilder builder = new EmbedBuilder
@@ -145,13 +148,14 @@ namespace Floofbot
             SocketGuild guild = Context.Guild;
 
             // Get Guild creation date and time, in UTC
-            string guildCreated = guild.CreatedAt.ToUniversalTime().ToString("dd\\/MMM\\/yyyy \\a\\t H:MM \\U\\T\\C");
+            string guildCreatedDate = guild.CreatedAt.ToUniversalTime().ToString("dd\\/MMM\\/yyyy");
+            string guildCreatedTime = guild.CreatedAt.ToUniversalTime().ToString("H:MM");
 
             int numberTextChannels = guild.TextChannels.Count;
             int numberVoiceChannels = guild.VoiceChannels.Count;
             int daysOld = Context.Message.CreatedAt.Subtract(guild.CreatedAt).Days;
             string daysAgo = $" That's " + ((daysOld == 0) ? "today!" : (daysOld == 1) ? $"yesterday!" : $"{daysOld} days ago!");
-            string createdAt = $"Created {guildCreated}." + daysAgo;
+            string createdAt = $"Created {guildCreatedDate} at {guildCreatedTime} UTC." + daysAgo;
             int totalMembers = guild.MemberCount;
             int onlineUsers = guild.Users.Where(mem => mem.Status == UserStatus.Online).Count();
             int numberRoles = guild.Roles.Count;
