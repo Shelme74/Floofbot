@@ -4,7 +4,7 @@
 FROM alpine:latest
 
 # Dependencies and curl for custom backup scripts
-RUN apk add --no-cache libintl libstdc++ curl
+RUN apk add --no-cache libintl libstdc++ curl icu-libs icu-data-full
 
 # Set and add working directory
 WORKDIR /root/
@@ -13,6 +13,7 @@ RUN mkdir data
 # Copy files
 COPY Floofbot/Scripts/LinuxDBBackup.sh .
 COPY artifacts/linux-musl-x64/Floofbot .
+COPY artifacts/linux-musl-x64/libe_sqlite3.so .
 
 # Fix for running in a container
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1

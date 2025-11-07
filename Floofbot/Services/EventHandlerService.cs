@@ -54,6 +54,8 @@ namespace Floofbot.Services
             _client.MessageReceived += OnMessage;
             _client.MessageReceived += RulesGate; // rfurry rules gate
             _client.ReactionAdded += _nicknameAlertService.OnReactionAdded;
+            _client.ThreadCreated += NewThread;
+            _client.ThreadUpdated += UpdatedThread;
 
             // a list of announcement channels for auto publishing
             announcementChannels = BotConfigFactory.Config.AnnouncementChannels;
@@ -147,6 +149,21 @@ namespace Floofbot.Services
                 await userMsg.DeleteAsync();
             }
         }
+        public async Task NewThread(SocketThreadChannel thread)
+        {
+            await thread.JoinAsync();
+            return;
+        }
+        public async Task UpdatedThread(Cacheable<SocketThreadChannel, ulong> channel, SocketThreadChannel thread)
+        {
+            if (thread != null)
+            {
+                if (thread.HasJoined != true)
+                {
+                    await thread.JoinAsync();
+                }
+            }
+        }
         public Task OnMessage(SocketMessage msg)
         {
             if (msg.Channel.GetType() == typeof(SocketDMChannel))
@@ -232,7 +249,7 @@ namespace Floofbot.Services
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"⚠️ Message Edited | {after.Author.Username}#{after.Author.Discriminator}")
+                    embed.WithTitle($"⚠️ Message Edited | {after.Author.Username}")
                          .WithColor(Color.DarkGrey)
                          .WithDescription($"{after.Author.Mention} ({after.Author.Id}) has edited their message in {channel.Mention}!")
                          .AddField("Before", messageBefore.Content, true)
@@ -253,8 +270,9 @@ namespace Floofbot.Services
             });
             return Task.CompletedTask;
         }
-        public Task MessageDeleted(Cacheable<IMessage, ulong> before, ISocketMessageChannel chan)
+        public Task MessageDeleted(Cacheable<IMessage, ulong> before, Cacheable<IMessageChannel, ulong>  channel)
         {
+            IMessageChannel chan = channel.Value;
             var _ = Task.Run(async () =>
             {
                 try
@@ -267,23 +285,25 @@ namespace Floofbot.Services
                     if (message.Author.IsBot)
                         return;
 
-                    var channel = chan as ITextChannel; // channel null, dm message?
-                    if (channel == null)
+                    if (chan == null)
                         return;
 
-                    if ((IsToggled(channel.Guild)) == false) // not toggled on
+                    IGuildChannel messageChannel = message.Channel as IGuildChannel;
+                    IGuild guild = messageChannel.Guild;
+
+                    if ((IsToggled(guild)) == false) // not toggled on
                         return;
 
 
-                    Discord.ITextChannel logChannel = await GetChannel(channel.Guild, "MessageDeletedChannel");
+                    Discord.ITextChannel logChannel = await GetChannel(guild, "MessageDeletedChannel");
                     if (logChannel == null)
                         return;
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"⚠️ Message Deleted | {message.Author.Username}#{message.Author.Discriminator}")
+                    embed.WithTitle($"⚠️ Message Deleted | {message.Author.Username}")
                          .WithColor(Color.Gold)
-                         .WithDescription($"{message.Author.Mention} ({message.Author.Id}) has had their message deleted in {channel.Mention}!")
+                         .WithDescription($"{message.Author.Mention} ({message.Author.Id}) has had their message deleted in {MentionUtils.MentionChannel(chan.Id)}!")
                          .WithCurrentTimestamp()
                          .WithFooter($"user_message_deleted user_messagelog {message.Author.Id}");
                     if (message.Content.Length > 0)
@@ -333,7 +353,7 @@ namespace Floofbot.Services
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"⚠️ Message Deleted By Bot | {before.Author.Username}#{before.Author.Discriminator}")
+                    embed.WithTitle($"⚠️ Message Deleted By Bot | {before.Author.Username}")
                          .WithColor(Color.Gold)
                          .WithDescription($"{before.Author.Mention} ({before.Author.Id}) has had their message deleted in {channel.Mention}!")
                          .AddField("Content", before.Content)
@@ -374,7 +394,7 @@ namespace Floofbot.Services
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"🔨 User Banned | {user.Username}#{user.Discriminator}")
+                    embed.WithTitle($"🔨 User Banned | {user.Username}")
                          .WithColor(Color.Red)
                          .WithDescription($"{user.Mention} | ``{user.Id}``")
                          .WithFooter($"user_banned user_banlog {user.Id}")
@@ -417,7 +437,7 @@ namespace Floofbot.Services
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"♻️ User Unbanned | {user.Username}#{user.Discriminator}")
+                    embed.WithTitle($"♻️ User Unbanned | {user.Username}")
                          .WithColor(Color.Gold)
                          .WithDescription($"{user.Mention} | ``{user.Id}``")
                          .WithFooter($"user_unbanned user_banlog {user.Id}")
@@ -437,8 +457,10 @@ namespace Floofbot.Services
             return Task.CompletedTask;
 
         }
-        public Task UserJoined(IGuildUser user)
+        public Task UserJoined(SocketGuildUser sUser)
         {
+            SocketGuild guild = sUser.Guild;
+            IGuildUser user = guild.GetUser(sUser.Id);
             var _ = Task.Run(async () =>
             {
                 try
@@ -461,7 +483,7 @@ namespace Floofbot.Services
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"✅ User Joined | {user.Username}#{user.Discriminator}")
+                    embed.WithTitle($"✅ User Joined | {user.Username}")
                          .WithColor(Color.Green)
                          .WithDescription($"{user.Mention} | ``{user.Id}``")
                          .AddField("Joined Server", user.JoinedAt?.ToString("ddd, dd MMM yyyy"), true)
@@ -482,7 +504,7 @@ namespace Floofbot.Services
             });
             return Task.CompletedTask;
         }
-        public Task UserLeft(IGuildUser user)
+        public Task UserLeft(SocketGuild guild, SocketUser user)
         {
             var _ = Task.Run(async () =>
             {
@@ -491,27 +513,18 @@ namespace Floofbot.Services
                     if (user.IsBot)
                         return;
 
-                    await _userRoleRetentionService.LogUserRoles(user);
 
-                    if ((IsToggled(user.Guild)) == false)
+                    if ((IsToggled(guild)) == false)
                         return;
 
-                    Discord.ITextChannel channel = await GetChannel(user.Guild, "UserLeftChannel");
+                    Discord.ITextChannel channel = await GetChannel(guild, "UserLeftChannel");
                     if (channel == null)
                         return;
 
                     var embed = new EmbedBuilder();
-                    embed.WithTitle($"❌ User Left | {user.Username}#{user.Discriminator}")
+                    embed.WithTitle($"❌ User Left | {user.Username}")
                          .WithColor(Color.Red)
                          .WithDescription($"{user.Mention} | ``{user.Id}``");
-                    if (user.JoinedAt != null)
-                    {
-                        DateTimeOffset userJoined = ((DateTimeOffset)user.JoinedAt);
-                        TimeSpan interval = DateTime.UtcNow - userJoined.DateTime;
-                        string day_word = interval.Days == 1 ? "day" : "days";
-                        embed.AddField("Joined Server", userJoined.ToString("ddd, dd MMM yyyy"), true);
-                        embed.AddField("Time at Server", $"{interval.Days} {day_word}", true);
-                    }
                     embed.WithFooter($"user_leave user_joinlog {user.Id}")
                          .WithCurrentTimestamp();
 
@@ -563,7 +576,7 @@ namespace Floofbot.Services
 
                     if (before.Username != after.Username)
                     {
-                        embed.WithTitle($"👥 Username Changed | {after.Username}#{after.Discriminator}")
+                        embed.WithTitle($"👥 Username Changed | {after.Username}")
                              .WithColor(Color.Purple)
                              .WithDescription($"{after.Mention} | ``{after.Id}``")
                              .AddField("Old Username", before.Username, true)
@@ -577,7 +590,7 @@ namespace Floofbot.Services
                     }
                     else if (before.AvatarId != after.AvatarId)
                     {
-                        embed.WithTitle($"🖼️ Avatar Changed | {after.Username}#{after.Discriminator}")
+                        embed.WithTitle($"🖼️ Avatar Changed | {after.Username}")
                              .WithColor(Color.Purple)
                              .WithDescription($"{after.Mention} | ``{after.Id}``")
                              .WithFooter($"user_avatar_change {after.Id}")
@@ -603,8 +616,9 @@ namespace Floofbot.Services
 
         }
 
-        public Task GuildMemberUpdated(SocketGuildUser before, SocketGuildUser after)
+        public Task GuildMemberUpdated(Cacheable<SocketGuildUser, ulong>  _before, SocketGuildUser after)
         {
+            SocketGuildUser before = _before.Value;
             var _ = Task.Run(async () =>
             {
                 try
@@ -634,7 +648,7 @@ namespace Floofbot.Services
 
                     if (before.Nickname != after.Nickname)
                     {
-                        embed.WithTitle($"👥 Nickname Changed | {after.Username}#{after.Discriminator}")
+                        embed.WithTitle($"👥 Nickname Changed | {after.Username}")
                              .WithColor(Color.Purple)
                              .WithDescription($"{after.Mention} | ``{after.Id}``")
                              .WithFooter($"user_nickname_change user_namelog {after.Id}")
@@ -656,6 +670,8 @@ namespace Floofbot.Services
                     }
                     else if (before.Roles.Count != after.Roles.Count)
                     {
+                        await _userRoleRetentionService.LogUserRoles(before as IGuildUser);
+
                         List<SocketRole> beforeRoles = new List<SocketRole>(before.Roles);
                         List<SocketRole> afterRoles = new List<SocketRole>(after.Roles);
                         List<SocketRole> roleDifference = new List<SocketRole>();
@@ -663,7 +679,7 @@ namespace Floofbot.Services
                         if (before.Roles.Count > after.Roles.Count) // roles removed
                         {
                             roleDifference = beforeRoles.Except(afterRoles).ToList();
-                            embed.WithTitle($"❗ Roles Removed | {after.Username}#{after.Discriminator}")
+                            embed.WithTitle($"❗ Roles Removed | {after.Username}")
                                  .WithColor(Color.Orange)
                                  .WithDescription($"{after.Mention} | ``{after.Id}``")
                                  .WithFooter($"user_roles_removed user_rolelog {after.Id}")
@@ -680,7 +696,7 @@ namespace Floofbot.Services
                         else if (before.Roles.Count < after.Roles.Count) // roles added
                         {
                             roleDifference = afterRoles.Except(beforeRoles).ToList();
-                            embed.WithTitle($"❗ Roles Added | {after.Username}#{after.Discriminator}")
+                            embed.WithTitle($"❗ Roles Added | {after.Username}")
                                  .WithColor(Color.Orange)
                                  .WithDescription($"{after.Mention} | ``{after.Id}``")
                                  .WithFooter($"user_roles_added user_rolelog {after.Id}")
@@ -726,7 +742,7 @@ namespace Floofbot.Services
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"👢 User Kicked | {user.Username}#{user.Discriminator}")
+                    embed.WithTitle($"👢 User Kicked | {user.Username}")
                          .WithColor(Color.Red)
                          .WithDescription($"{user.Mention} | ``{user.Id}``")
                          .AddField("Kicked By", kicker.Mention)
@@ -764,7 +780,7 @@ namespace Floofbot.Services
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"🔇 User Muted | {user.Username}#{user.Discriminator}")
+                    embed.WithTitle($"🔇 User Muted | {user.Username}")
                          .WithColor(Color.Teal)
                          .WithDescription($"{user.Mention} | ``{user.Id}``")
                          .AddField("Muted By", muter.Mention)
@@ -803,7 +819,7 @@ namespace Floofbot.Services
 
                     var embed = new EmbedBuilder();
 
-                    embed.WithTitle($"🔊 User Unmuted | {user.Username}#{user.Discriminator}")
+                    embed.WithTitle($"🔊 User Unmuted | {user.Username}")
                          .WithColor(Color.Teal)
                          .WithDescription($"{user.Mention} | ``{user.Id}``")
                          .AddField("Unmuted By", unmuter.Mention)

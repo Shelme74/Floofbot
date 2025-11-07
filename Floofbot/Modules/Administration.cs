@@ -13,6 +13,8 @@ using Microsoft.EntityFrameworkCore;
 using Serilog;
 using System.Drawing.Printing;
 using Discord.Net;
+using System.Security.Cryptography;
+using Microsoft.Extensions.Configuration.UserSecrets;
 
 namespace Floofbot.Modules
 {
@@ -52,7 +54,7 @@ namespace Floofbot.Modules
                         {
                             UserID = Convert.ToUInt64(userID),
                             ModID = Context.Message.Author.Id,
-                            ModUsername = $"{Context.Message.Author.Username}#{Context.Message.Author.Discriminator}",
+                            ModUsername = $"{Context.Message.Author.Username}",
                             Reason = reason
                         });
                         _floofDB.SaveChanges();
@@ -65,6 +67,17 @@ namespace Floofbot.Modules
                     await Context.Channel.SendMessageAsync($"⚠️ Could not resolve user: \"{user}\"");
                     return;
                 }
+            }
+
+            if (badUser.Id == Context.Client.CurrentUser.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ I cannot ban myself.");
+                return;
+            }
+            if (badUser.Id == Context.User.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to ban yourself.");
+                return;
             }
 
             try
@@ -82,18 +95,84 @@ namespace Floofbot.Modules
                 await Context.Channel.SendMessageAsync("⚠️ | Unable to DM user to notify them of their ban!");
             }
 
-            //bans the user
-            await Context.Guild.AddBanAsync(badUser.Id, 0, $"{Context.User.Username}#{Context.User.Discriminator} -> {reason}");
-
+            try
+            {
+                //bans the user
+                await Context.Guild.AddBanAsync(badUser.Id, 0, $"{Context.User.Username} -> {reason}");
+            }
+            catch (Exception ex)
+            {
+                await Context.Channel.SendMessageAsync("Command unable to be performed sucessfully: " + ex.ToString());
+                return;
+            }
             EmbedBuilder modEmbedBuilder = new EmbedBuilder();
             modEmbedBuilder = new EmbedBuilder();
             modEmbedBuilder.Title = (":shield: User Banned");
             modEmbedBuilder.Color = ADMIN_COLOR;
-            modEmbedBuilder.Description = $"{badUser.Username}#{badUser.Discriminator} has been banned from {Context.Guild.Name}";
+            modEmbedBuilder.Description = $"{badUser.Username} has been banned from {Context.Guild.Name}";
             modEmbedBuilder.AddField("User ID", badUser.Id);
-            modEmbedBuilder.AddField("Moderator", $"{Context.User.Username}#{Context.User.Discriminator}");
+            modEmbedBuilder.AddField("Moderator", $"{Context.User.Username}");
             await Context.Channel.SendMessageAsync("", false, modEmbedBuilder.Build());
+        }
 
+        [Command("unban")]
+        [Alias("ub")]
+        [Summary("Unbans a user from the server")]
+        [RequireContext(ContextType.Guild)]
+        [RequireUserPermission(GuildPermission.BanMembers)]
+        public async Task UnYeetUser([Summary("user")] string user)
+        {
+            IUser badUser = resolveUser(user);
+            ulong userId;
+            if (badUser == null)
+            {
+                if (Regex.IsMatch(user, @"\d{16,}"))
+                {
+                    userId = Convert.ToUInt64(Regex.Match(user, @"\d{16,}").Value);
+                }
+                else
+                {
+                    await Context.Channel.SendMessageAsync($"⚠️ Could not resolve user: \"{user}\"");
+                    return;
+                }
+            }
+            else
+            {
+                userId= badUser.Id;
+            }
+
+            if (userId == Context.Client.CurrentUser.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ I cannot unban myself.");
+                return;
+            }
+            if (userId == Context.User.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to unban yourself.");
+                return;
+            }
+            try
+            {
+                await Context.Guild.RemoveBanAsync(userId); // unban user
+            }
+            catch (HttpException)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ Command unable to be performed - ban entry not be found!");
+                return;
+            }
+            catch (Exception ex)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ Command unable to be performed sucessfully. User may not be found?" + ex.ToString());
+                return;
+            }
+            EmbedBuilder modEmbedBuilder = new EmbedBuilder();
+            modEmbedBuilder = new EmbedBuilder();
+            modEmbedBuilder.Title = (":shield: User Unbanned");
+            modEmbedBuilder.Color = ADMIN_COLOR;
+            modEmbedBuilder.Description = $"{userId} has been unbanned from {Context.Guild.Name}";
+            modEmbedBuilder.AddField("User ID", userId);
+            modEmbedBuilder.AddField("Moderator", $"{Context.User.Username}");
+            await Context.Channel.SendMessageAsync("", false, modEmbedBuilder.Build());
         }
 
         [Command("pruneban")]
@@ -103,7 +182,6 @@ namespace Floofbot.Modules
         [RequireUserPermission(GuildPermission.BanMembers)]
         public async Task pruneBanUser(
             [Summary("user")] string user,
-            [Summary("Number Of Days To Prune")] int pruneDays = 0,
             [Summary("reason")][Remainder] string reason = "No Reason Provided")
         {
             IUser badUser = resolveUser(user);
@@ -123,7 +201,7 @@ namespace Floofbot.Modules
                         {
                             UserID = Convert.ToUInt64(userID),
                             ModID = Context.Message.Author.Id,
-                            ModUsername = $"{Context.Message.Author.Username}#{Context.Message.Author.Discriminator}",
+                            ModUsername = $"{Context.Message.Author.Username}",
                             Reason = reason
                         });
                         _floofDB.SaveChanges();
@@ -136,6 +214,17 @@ namespace Floofbot.Modules
                     await Context.Channel.SendMessageAsync($"⚠️ Could not resolve user: \"{user}\"");
                     return;
                 }
+            }
+
+            if (badUser.Id == Context.Client.CurrentUser.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ I cannot purge and ban myself.");
+                return;
+            }
+            if (badUser.Id == Context.User.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to purge and ban yourself.");
+                return;
             }
 
             try
@@ -152,17 +241,23 @@ namespace Floofbot.Modules
             {
                 await Context.Channel.SendMessageAsync("⚠️ | Unable to DM user to notify them of their ban!");
             }
-
-            //bans the user
-            await Context.Guild.AddBanAsync(badUser.Id, pruneDays, $"{Context.User.Username}#{Context.User.Discriminator} -> {reason}");
-
+            try
+            {
+                //bans the user
+                await Context.Guild.AddBanAsync(badUser.Id, 7, $"{Context.User.Username} -> {reason}"); // default 7 days prune
+            }
+            catch (Exception ex)
+            {
+                await Context.Channel.SendMessageAsync("Command unable to be performed sucessfully: " + ex.ToString());
+                return;
+            }
             EmbedBuilder modEmbedBuilder = new EmbedBuilder();
             modEmbedBuilder = new EmbedBuilder();
             modEmbedBuilder.Title = (":shield: User Banned");
             modEmbedBuilder.Color = ADMIN_COLOR;
-            modEmbedBuilder.Description = $"{badUser.Username}#{badUser.Discriminator} has been banned from {Context.Guild.Name}";
+            modEmbedBuilder.Description = $"{badUser.Username} has been banned from {Context.Guild.Name}";
             modEmbedBuilder.AddField("User ID", badUser.Id);
-            modEmbedBuilder.AddField("Moderator", $"{Context.User.Username}#{Context.User.Discriminator}");
+            modEmbedBuilder.AddField("Moderator", $"{Context.User.Username}");
             await Context.Channel.SendMessageAsync("", false, modEmbedBuilder.Build());
         }
 
@@ -191,7 +286,7 @@ namespace Floofbot.Modules
                     if (index < autoBans.Count)
                     {
                         var modUser = resolveUser(autoBans[index].ModID.ToString()); // try to resolve the mod who added it
-                        var modUsername = ((modUser != null) ? $"{modUser.Username}#{modUser.Discriminator}" : $"{autoBans[index].ModUsername}"); // try to get mod's new username, otherwise, use database stored name
+                        var modUsername = ((modUser != null) ? $"{modUser.Username}" : $"{autoBans[index].ModUsername}"); // try to get mod's new username, otherwise, use database stored name
                         text += $"{index + 1}. {autoBans[index].UserID} - added by {modUsername}\n";
                     }
                 }
@@ -265,6 +360,18 @@ namespace Floofbot.Modules
                 await Context.Channel.SendMessageAsync($"⚠️ Could not resolve user: \"{user}\"");
                 return;
             }
+
+            if (badUser.Id == Context.Client.CurrentUser.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ I cannot kick myself.");
+                return;
+            }
+            if (badUser.Id == Context.User.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to kick yourself.");
+                return;
+            }
+
             try
             {
                 //sends message to user
@@ -280,15 +387,23 @@ namespace Floofbot.Modules
                 await Context.Channel.SendMessageAsync("⚠️ | Unable to DM user to notify them of their kick!");
             }
 
-            //kicks users
-            await Context.Guild.GetUser(badUser.Id).KickAsync(reason);
-            EmbedBuilder kickBuilder = new EmbedBuilder();
-            kickBuilder.Title = ("🥾 User Kicked");
-            kickBuilder.Color = ADMIN_COLOR;
-            kickBuilder.Description = $"{badUser.Username}#{badUser.Discriminator} has been kicked from {Context.Guild.Name}";
-            kickBuilder.AddField("User ID", badUser.Id);
-            kickBuilder.AddField("Moderator", $"{Context.User.Username}#{Context.User.Discriminator}");
-            await Context.Channel.SendMessageAsync("", false, kickBuilder.Build());
+            try
+            {
+                //kicks users
+                await Context.Guild.GetUser(badUser.Id).KickAsync(reason);
+                EmbedBuilder kickBuilder = new EmbedBuilder();
+                kickBuilder.Title = ("🥾 User Kicked");
+                kickBuilder.Color = ADMIN_COLOR;
+                kickBuilder.Description = $"{badUser.Username} has been kicked from {Context.Guild.Name}";
+                kickBuilder.AddField("User ID", badUser.Id);
+                kickBuilder.AddField("Moderator", $"{Context.User.Username}");
+                await Context.Channel.SendMessageAsync("", false, kickBuilder.Build());
+            }
+            catch 
+            {
+                await Context.Channel.SendMessageAsync("⚠️ | Unable to kick user! Check my permissions.");
+                return;
+            }
         }
 
         [Command("silentkick")]
@@ -307,15 +422,33 @@ namespace Floofbot.Modules
                 return;
             }
 
-            //kicks users
-            await Context.Guild.GetUser(badUser.Id).KickAsync(reason);
+            if (badUser.Id == Context.Client.CurrentUser.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ I cannot kick myself.");
+                return;
+            }
+            if (badUser.Id == Context.User.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to kick yourself.");
+                return;
+            }
+            try
+            {
+                //kicks users
+                await Context.Guild.GetUser(badUser.Id).KickAsync(reason);
+            }
+            catch (Exception ex)
+            {
+                await Context.Channel.SendMessageAsync("Command unable to be performed sucessfully: " + ex.ToString());
+                return;
+            }
             EmbedBuilder kickBuilder = new EmbedBuilder();
-            kickBuilder.Title = ("🥾 User Silently Kicked");
-            kickBuilder.Color = ADMIN_COLOR;
-            kickBuilder.Description = $"{badUser.Username}#{badUser.Discriminator} has been silently kicked from {Context.Guild.Name}";
-            kickBuilder.AddField("User ID", badUser.Id);
-            kickBuilder.AddField("Moderator", $"{Context.User.Username}#{Context.User.Discriminator}");
-            await Context.Channel.SendMessageAsync("", false, kickBuilder.Build());
+                kickBuilder.Title = ("🥾 User Silently Kicked");
+                kickBuilder.Color = ADMIN_COLOR;
+                kickBuilder.Description = $"{badUser.Username} has been silently kicked from {Context.Guild.Name}";
+                kickBuilder.AddField("User ID", badUser.Id);
+                kickBuilder.AddField("Moderator", $"{Context.User.Username}");
+                await Context.Channel.SendMessageAsync("", false, kickBuilder.Build());
         }
 
         [Command("warn")]
@@ -358,6 +491,16 @@ namespace Floofbot.Modules
             }
             else
             {
+                if (badUser.Id == Context.Client.CurrentUser.Id)
+                {
+                    await Context.Channel.SendMessageAsync("⚠️ I cannot warn myself.");
+                    return;
+                }
+                if (badUser.Id == Context.User.Id)
+                {
+                    await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to warn yourself.");
+                    return;
+                }
                 uid = badUser.Id;
             }
 
@@ -366,7 +509,7 @@ namespace Floofbot.Modules
                 DateAdded = DateTime.Now,
                 Forgiven = false,
                 GuildId = Context.Guild.Id,
-                Moderator = $"{Context.User.Username}#{Context.User.Discriminator}",
+                Moderator = $"{Context.User.Username}",
                 ModeratorId = Context.User.Id,
                 Reason = reason,
                 UserId = uid,
@@ -395,8 +538,10 @@ namespace Floofbot.Modules
             builder = new EmbedBuilder();
             builder.Title = (":shield: User Warned");
             builder.Color = ADMIN_COLOR;
+            string badUserIdentifier = (badUser != null) ? $"{badUser.Username}" : $"{uid}";
+            builder.Description = $"Warning added for {badUserIdentifier} with reason {reason}";
             builder.AddField("User ID", uid);
-            builder.AddField("Moderator", $"{Context.User.Username}#{Context.User.Discriminator}");
+            builder.AddField("Moderator", $"{Context.User.Username}");
 
             await Context.Channel.SendMessageAsync("", false, builder.Build());
         }
@@ -441,6 +586,16 @@ namespace Floofbot.Modules
             }
             else
             {
+                if (badUser.Id == Context.Client.CurrentUser.Id)
+                {
+                    await Context.Channel.SendMessageAsync("⚠️ I cannot add usernotes for myself.");
+                    return;
+                }
+                if (badUser.Id == Context.User.Id)
+                {
+                    await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to add usernotes to yourself.");
+                    return;
+                }
                 uid = badUser.Id;
             }
 
@@ -448,7 +603,7 @@ namespace Floofbot.Modules
                 DateAdded = DateTime.Now,
                 Forgiven = false,
                 GuildId = Context.Guild.Id,
-                Moderator =  $"{Context.User.Username}#{Context.User.Discriminator}",
+                Moderator =  $"{Context.User.Username}",
                 ModeratorId = Context.User.Id,
                 Reason = reason,
                 UserId = uid
@@ -458,8 +613,10 @@ namespace Floofbot.Modules
             builder = new EmbedBuilder();
             builder.Title = (":pencil: User Note Added");
             builder.Color = ADMIN_COLOR;
+            string badUserIdentifier = (badUser != null) ? $"{badUser.Username}" : $"{uid}";
+            builder.Description = $"Usernote added for {badUserIdentifier} with reason {reason}";
             builder.AddField("User ID", uid);
-            builder.AddField("Moderator", $"{Context.User.Username}#{Context.User.Discriminator}");
+            builder.AddField("Moderator", $"{Context.User.Username}");
 
             await Context.Channel.SendMessageAsync("", false, builder.Build());
         }
@@ -480,7 +637,7 @@ namespace Floofbot.Modules
                 {
                     userId = Regex.Match(user, @"\d{16,}").Value;
                 }
-                else 
+                else
                 {
                     await Context.Channel.SendMessageAsync("⚠️ Cannot find user");
                     return;
@@ -488,9 +645,18 @@ namespace Floofbot.Modules
             }
             else
             {
+                if (badUser.Id == Context.Client.CurrentUser.Id)
+                {
+                    await Context.Channel.SendMessageAsync("⚠️ I cannot purge my own messages.");
+                    return;
+                }
+                if (badUser.Id == Context.User.Id)
+                {
+                    await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot purge your own messages.");
+                    return;
+                }
                 userId = badUser.Id.ToString();
             }
-
             // retrieve user messages from ALL channels
             foreach (ISocketMessageChannel channel in Context.Guild.TextChannels)
             {
@@ -501,8 +667,11 @@ namespace Floofbot.Modules
                     {
                         if (message.Author.Id.ToString() == userId)
                         {
-                            await channel.DeleteMessageAsync(message);
-                            await Task.Delay(100); // helps reduce the risk of getting rate limited by the API
+                            if (message != null)
+                            {
+                                await channel.DeleteMessageAsync(message);
+                                await Task.Delay(100); // helps reduce the risk of getting rate limited by the API
+                            }
                         }
                     }
                 }
@@ -511,8 +680,10 @@ namespace Floofbot.Modules
             EmbedBuilder builder = new EmbedBuilder();
             builder.Title = (":shield: Messages Purged");
             builder.Color = ADMIN_COLOR;
+            string badUserIdentifier = (badUser != null) ? $"{badUser.Username}" : $"{userId}";
+            builder.Description = $"{badUser.Username}'s messages were purged";
             builder.AddField("User ID", badUser.Id);
-            builder.AddField("Moderator", $"{Context.User.Username}#{Context.User.Discriminator}");
+            builder.AddField("Moderator", $"{Context.User.Username}");
 
             await Context.Channel.SendMessageAsync("", false, builder.Build());
         }
@@ -537,7 +708,7 @@ namespace Floofbot.Modules
             }
             else // a mod
             {
-                if (selfUser.GuildPermissions.KickMembers) // want to view their own warnlog 
+                if (selfUser.GuildPermissions.KickMembers) // moderator wants to view a warnlog
                 {
                     IUser badUser = resolveUser(user);
                     if (badUser == null)
@@ -549,7 +720,14 @@ namespace Floofbot.Modules
                             return;
                         }
                     else
+                    {
+                        if (badUser.Id == Context.Client.CurrentUser.Id)
+                        {
+                            await Context.Channel.SendMessageAsync("⚠️ You cannot view my warnlog.");
+                            return;
+                        }
                         embed = GetWarnings(badUser.Id, false);
+                    }
                     if (embed == null)
                     {
                             return;
@@ -584,6 +762,20 @@ namespace Floofbot.Modules
             await UpdateForgivenStatus("unforgiven", type, badUser);
         }
 
+        [Command("userid")]
+        [Summary("Displays the ID of the specified user. If no parameters are given, displays the user's own ID")]
+        [RequireContext(ContextType.Guild)]
+        [RequireBotPermission(GuildPermission.KickMembers)]
+        public async Task UserId(IGuildUser usr = null)
+        {
+            var user = usr ?? Context.User as IGuildUser;
+
+            if (user == null)
+                return;
+
+            await Context.Channel.SendMessageAsync(user.Id.ToString());
+        }
+
         [Command("mute")]
         [Summary("Applies a mute role to a user")]
         [RequireContext(ContextType.Guild)]
@@ -593,6 +785,17 @@ namespace Floofbot.Modules
             IUser badUser = resolveUser(user);
             if (badUser == null) {
                 await Context.Channel.SendMessageAsync($"⚠️ Could not find user \"{user}\"");
+                return;
+            }
+
+            if (badUser.Id == Context.Client.CurrentUser.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ I cannot mute myself.");
+                return;
+            }
+            if (badUser.Id == Context.User.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to mute yourself.");
                 return;
             }
 
@@ -629,7 +832,7 @@ namespace Floofbot.Modules
             }
 
             if (Context.Guild.GetUser(badUser.Id).Roles.Contains(muteRole)) {
-                await Context.Channel.SendMessageAsync($"{badUser.Username}#{badUser.Discriminator} is already muted!");
+                await Context.Channel.SendMessageAsync($"{badUser.Username} is already muted!");
                 return;
             }
 
@@ -637,7 +840,7 @@ namespace Floofbot.Modules
 
             EmbedBuilder builder = new EmbedBuilder() {
                 Title = "🔇 User Muted",
-                Description = $"{badUser.Username}#{badUser.Discriminator} Muted!",
+                Description = $"{badUser.Username} Muted!",
                 Color = ADMIN_COLOR
             };
 
@@ -748,6 +951,17 @@ namespace Floofbot.Modules
                 return;
             }
 
+            if (badUser.Id == Context.Client.CurrentUser.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ I cannot unmute myself.");
+                return;
+            }
+            if (badUser.Id == Context.User.Id)
+            {
+                await Context.Channel.SendMessageAsync("⚠️ For safety reasons, I cannot allow you to unmute yourself.");
+                return;
+            }
+
             var muteRole = Context.Guild.GetRole(
                    _floofDB.AdminConfig.AsQueryable()
                    .Where(x => x.ServerId == Context.Guild.Id)
@@ -763,13 +977,13 @@ namespace Floofbot.Modules
                 await Context.Guild.GetUser(badUser.Id).RemoveRoleAsync(muteRole);
             }
             else {
-                await Context.Channel.SendMessageAsync($"{badUser.Username}#{badUser.Discriminator} is not muted");
+                await Context.Channel.SendMessageAsync($"{badUser.Username} is not muted");
                 return;
             }
 
             EmbedBuilder builder = new EmbedBuilder() {
                 Title = "🔊 User Unmuted",
-                Description = $"{badUser.Username}#{badUser.Discriminator} was unmuted!",
+                Description = $"{badUser.Username} was unmuted!",
                 Color = ADMIN_COLOR
             };
 
@@ -922,7 +1136,7 @@ namespace Floofbot.Modules
             if (user == null) // no user, just id in database
                 builder.WithTitle($"{((type == "warnings") ? "Warnings" : "User Notes")} for {badUser}");
             else
-                builder.WithTitle($"{((type == "warnings") ? "Warnings" : "User Notes")} for {user.Username}#{user.Discriminator}");
+                builder.WithTitle($"{((type == "warnings") ? "Warnings" : "User Notes")} for {user.Username}");
             if (warnings == null) // for some reason didnt recieve data from database
             {
                 Log.Error("Fatal error when trying to access warnings for the forgive user command!");
@@ -965,7 +1179,7 @@ namespace Floofbot.Modules
                             if (w.Id == warningId)
                             {
                                 var modId = Context.Message.Author.Id;
-                                var modUsername = $"{Context.Message.Author.Username}#{Context.Message.Author.Discriminator}";
+                                var modUsername = $"{Context.Message.Author.Username}";
                                 await SetWarningForgivenStatus(w, !oldStatus, modId);
                                 await Context.Channel.SendMessageAsync($"Got it! {modUsername} has {function} the warning with the ID {w.Id} and the reason: {w.Reason}.");
                                 return;
@@ -979,7 +1193,7 @@ namespace Floofbot.Modules
                             if (un.Id == warningId)
                             {
                                 var modId = Context.Message.Author.Id;
-                                var modUsername = $"{Context.Message.Author.Username}#{Context.Message.Author.Discriminator}";
+                                var modUsername = $"{Context.Message.Author.Username}";
                                 await SetUserNoteForgivenStatus(un, !oldStatus, modId);
                                 await Context.Channel.SendMessageAsync($"Got it! {modUsername} has {function} the user note with the ID {un.Id} and the reason: {un.Reason}.");
                                 return;
@@ -997,7 +1211,7 @@ namespace Floofbot.Modules
             }
             catch (Exception ex)
             {
-                await Context.Channel.SendMessageAsync(ex.ToString());
+                await Context.Channel.SendMessageAsync("Command unable to be performed sucessfully: " + ex.ToString());
             }
         }
         private async Task SetWarningForgivenStatus(Warning w, bool status, ulong forgivenBy)
@@ -1035,27 +1249,15 @@ namespace Floofbot.Modules
                     .Where(u => u.UserId == uid && u.GuildId == Context.Guild.Id)
                     .OrderByDescending(x => x.DateAdded).Take(10);
             }
-
+            string badUserIdentifier = (badUser != null) ? $"{badUser.Username}" : $"{uid}";
             if (!isOwnLog) // mod viewing someones history
             {
-                if (badUser == null) // client cant get user - no mutual servers?
-                {
                     if (formalWarnings.Count() == 0 && userNotes.Count() == 0)
                     {
-                        string message = $"{uid} is a good noodle. They have no warnings or user notes!";
+                        string message = $"{badUserIdentifier} is a good noodle. They have no warnings or user notes!";
                         var embed = CreateDescriptionEmbed(message);
                         return embed;
                     }
-                }
-                else
-                {
-                    if (formalWarnings.Count() == 0 && userNotes.Count() == 0)
-                    {
-                        string message = $"{badUser.Username}#{badUser.Discriminator} is a good noodle. They have no warnings or user notes!";
-                        var embed = CreateDescriptionEmbed(message);
-                        return embed;
-                    }
-                }
             }
             else // own users history
             {
@@ -1072,10 +1274,8 @@ namespace Floofbot.Modules
             int warningCount = 0;
             int userNoteCount = 0;
 
-            if (badUser == null && !isOwnLog) // no user, just id in database
-                builder.WithTitle($"Warnings for {uid}");
-            else if (badUser != null && !isOwnLog)
-                builder.WithTitle($"Warnings for {badUser.Username}#{badUser.Discriminator}");
+            if (!isOwnLog) // no user, just id in database
+                builder.WithTitle($"Warnings for {badUserIdentifier}");
             else
                 builder.WithTitle($"Your Warnings");
 
@@ -1093,7 +1293,7 @@ namespace Floofbot.Modules
                         if (warning.Forgiven)
                         {
                             IUser forgivenBy = resolveUser(warning.ForgivenBy.ToString());
-                            var forgivenByText = (forgivenBy == null) ? "" : $"(forgiven by {forgivenBy.Username}#{forgivenBy.Discriminator})";
+                            var forgivenByText = (forgivenBy == null) ? "" : $"(forgiven by {forgivenBy.Username})";
                             builder.AddField($"~~**{warningCount + 1}**. {warning.DateAdded.ToString("yyyy MMMM dd")} - {warning.Moderator}~~ {forgivenByText}", $"{hyperLink}```{warning.Reason}```");
                         }
                         else
@@ -1131,7 +1331,7 @@ namespace Floofbot.Modules
                         if (usernote.Forgiven)
                         {
                             IUser forgivenBy = resolveUser(usernote.ForgivenBy.ToString());
-                            var forgivenByText = (forgivenBy == null) ? "" : $"(forgiven by {forgivenBy.Username}#{forgivenBy.Discriminator})";
+                            var forgivenByText = (forgivenBy == null) ? "" : $"(forgiven by {forgivenBy.Username})";
                             builder.AddField($"~~**{userNoteCount + 1}**. {usernote.DateAdded.ToString("yyyy MMMM dd")} - {usernote.Moderator}~~ {forgivenByText}", $"```{usernote.Reason}```");
 
                         }
